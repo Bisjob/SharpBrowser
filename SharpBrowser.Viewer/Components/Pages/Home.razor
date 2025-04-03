@@ -1,0 +1,143 @@
+﻿@page "/"
+@using System.Text.RegularExpressions
+
+@inject IJSRuntime js
+@implements IAsyncDisposable
+
+
+<div class="d-flex" style="justify-content:space-between;align-items:center;gap:2em;">
+    <EditForm Model="browser.Options">
+        <div class="d-flex">
+            <label>
+                Auto exec. scripts:
+                <InputCheckbox @bind-Value=browser.Options.AutoExecuteScript />
+            </label>
+        </div>
+    </EditForm>
+
+    <div class="d-flex" style="gap:1em;flex-grow:1;">
+        <input type="text" @bind-value=curUrl style="flex-grow:1;" />
+        <button class="button primary" @onclick=Navigate>Go</button>
+        <button class="button primary" @onclick=StateHasChanged>Refresh</button>
+    </div>
+
+    <div class="d-flex" style="gap:1em;">
+        @if (browser.ScriptsToExecute.Any())
+        {
+            <div style="position:relative">
+                <span @onclick="@(() => scriptsOpenned = !scriptsOpenned)">@browser.ScriptsToExecute.Count() scripts not executed</span>
+                @if (scriptsOpenned)
+                {
+                    <div style="position: absolute;top: 100%;display: flex;flex-direction: column;z-index: 999;right: 0;max-width: 15em;background:white;">
+                        @foreach (var script in browser.ScriptsToExecute)
+                        {
+                            <div style="padding:0.5em;border:solid 1px black;width:100%;max-height:10em;overflow:hidden;">
+                                @script
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        @if (browser.Errors.Any())
+        {
+            <div style="position:relative">
+                <span @onclick="@(() => errorsOpenned = !errorsOpenned)">@browser.Errors.Count() scripts in error</span>
+                @if (errorsOpenned)
+                {
+                    <div style="position: absolute;top: 100%;display: flex;flex-direction: column;z-index: 999;right: 0;max-width: 15em;background:white;">
+                        @foreach (var err in browser.Errors)
+                        {
+                            <div style="padding:0.5em;border:solid 1px black;width:100%;max-height:10em;overflow:hidden;">
+                                @err
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<div style="border:solid black 1px;position:relative;display:flex;flex-direction:column;">
+    <h2>@browser.GetPageTitle()</h2>
+    <shadow-root-viewer @ref=viewerRef></shadow-root-viewer>
+
+    @if (isLoading)
+    {
+        <div style="width:100%;height:100%;top:0;left:0;position:absolute;background: rgba(0,0,0,0.5);">
+            <div class="loader"></div>
+        </div>
+    }
+</div>
+
+@code {
+    string curUrl = "https://property-filter.co.uk/";
+
+    Browser browser = BrowserFactory.CreateBrowser();
+
+    private ElementReference viewerRef;
+    private Lazy<Task<IJSObjectReference>> moduleTask;
+    private DotNetObjectReference<Home> componentReference;
+    bool isLoading;
+
+    bool scriptsOpenned;
+    bool errorsOpenned;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            componentReference = DotNetObjectReference.Create(this);
+
+            moduleTask = new(() => js.InvokeAsync<IJSObjectReference>(
+                "import", "./js/shadowDOM.js").AsTask());
+        }
+
+        var styles = browser.GetStyleContent();
+        var content = browser.GetBodyContent();
+        if (!string.IsNullOrEmpty(content))
+        {
+            // Remove scripts
+            content = Regex.Replace(
+               content,
+               @"<script\b[^>]*>.*?</script>",
+               "",
+               RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            var module = await moduleTask.Value;
+            await module.InvokeVoidAsync("setShadowContent", viewerRef, content, styles, componentReference, nameof(HandleAnchorClick));
+        }
+    }
+
+    async Task Navigate()
+    {
+        if (!curUrl.StartsWith("http"))
+            curUrl = "https://" + curUrl;
+
+        await browser.NavigateTo(curUrl);
+        curUrl = browser.GetUri().ToString();
+    }
+
+    [JSInvokable]
+    public async Task HandleAnchorClick(string href)
+    {
+        curUrl = href.Replace("https://0.0.0.0", string.Empty);
+        if (!curUrl.StartsWith("http"))
+        {
+            var uri = new Uri(browser.GetUri(), curUrl);
+            curUrl = uri.ToString();
+        }
+        await Navigate();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (moduleTask.IsValueCreated)
+        {
+            var module = await moduleTask.Value;
+            await module.DisposeAsync();
+        }
+    }
+}
