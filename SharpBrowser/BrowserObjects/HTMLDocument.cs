@@ -1,6 +1,7 @@
 ﻿using AngleSharp;
 using AngleSharp.Dom;
 using Jint;
+using Jint.Native;
 using Jint.Runtime.Descriptors;
 using SharpBrowser.Extensions;
 

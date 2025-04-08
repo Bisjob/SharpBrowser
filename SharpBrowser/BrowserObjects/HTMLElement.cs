@@ -3,12 +3,12 @@ using Jint.Native;
 using Jint.Runtime.Descriptors;
 using SharpBrowser.Extensions;
 using SharpBrowser.Helpers;
-using System.Xml.Linq;
 
 namespace SharpBrowser.BrowserObjects
 {
     public class HTMLElement : ExpandableObject
     {
+        public event EventHandler HasChanged;
         public string TagName { get; }
         public string InnerHTML { get; set; } = string.Empty;
         public string TextContent { get; set; } = string.Empty;
@@ -33,6 +33,7 @@ namespace SharpBrowser.BrowserObjects
                 var cssKey = TextHelper.ToKebabCase(e.Name);
                 Style[cssKey] = e.Value.AsString();
                 Attributes["style"] = string.Join("; ", Style.Select(kv => $"{kv.Key}: {kv.Value}"));
+                RaiseHasChanged();
             };
             FastSetProperty("style", new PropertyDescriptor(styleProxy, true, true, true));
 
@@ -53,6 +54,7 @@ namespace SharpBrowser.BrowserObjects
                         Attributes["class"] = string.Join(" ", list);
                     }
                 }
+                RaiseHasChanged();
             });
             classList.AddMethod("remove", args =>
             {
@@ -66,6 +68,7 @@ namespace SharpBrowser.BrowserObjects
                         Attributes["class"] = string.Join(" ", list);
                     }
                 }
+                RaiseHasChanged();
             });
             FastSetProperty("classList", new PropertyDescriptor(classList, true, true, true));
 
@@ -144,7 +147,8 @@ namespace SharpBrowser.BrowserObjects
                 if (args.Length >= 2 && args[0].IsString() && args[1].IsFunction())
                 {
                     var type = args[0].AsString();
-                    var cb = args[1].ToObject() as Delegate;
+                    var callback = args[1];
+                    var cb = (JsValue[] callbackArgs) => callback.Call(callbackArgs);
                     AddEventListener(type, cb);
                 }
             });
@@ -153,6 +157,7 @@ namespace SharpBrowser.BrowserObjects
                 if (args.Length >= 2  && args[0].IsString() && args[1].IsFunction())
                 {
                     var type = args[0].AsString();
+                    // Need to take same reference or register a hash to remove it
                     var cb = args[1].ToObject() as Delegate;
                     RemoveEventListener(type, cb);
                 }
@@ -206,7 +211,7 @@ namespace SharpBrowser.BrowserObjects
         {
             tag = tag.ToUpperInvariant();
             var list = new List<HTMLElement>();
-            CollectBy(this, list, el => el.TagName == tag);
+            CollectBy(this, list, el => el.TagName.Equals(tag, StringComparison.OrdinalIgnoreCase));
             return list;
         }
         public IEnumerable<HTMLElement> GetElementsByClassName(string cls)
@@ -251,6 +256,38 @@ namespace SharpBrowser.BrowserObjects
 
         private static bool Matches(HTMLElement el, string selector)
         {
+            var parts = selector.Split(' ', StringSplitOptions.RemoveEmptyEntries).Reverse().ToArray();
+            return MatchesRecursive(el, parts, 0);
+        }
+
+        private static bool MatchesRecursive(HTMLElement el, string[] parts, int index)
+        {
+            if (el == null || index >= parts.Length)
+                return false;
+
+            if (!MatchesSingle(el, parts[index]))
+                return false;
+
+            if (index == parts.Length - 1)
+                return true;
+
+            return MatchesAncestor(el.ParentElement, parts, index + 1);
+        }
+
+        private static bool MatchesAncestor(HTMLElement el, string[] parts, int index)
+        {
+            while (el != null)
+            {
+                if (MatchesRecursive(el, parts, index))
+                    return true;
+
+                el = el.ParentElement;
+            }
+            return false;
+        }
+
+        private static bool MatchesSingle(HTMLElement el, string selector)
+        {
             if (selector.StartsWith('.'))
             {
                 var cls = selector[1..];
@@ -261,7 +298,9 @@ namespace SharpBrowser.BrowserObjects
                 var id = selector[1..];
                 return el.Attributes.TryGetValue("id", out var val) && val == id;
             }
-            return el.TagName.Equals(selector, StringComparison.OrdinalIgnoreCase);
+
+            // Match tag name
+            return string.Equals(el.TagName, selector, StringComparison.OrdinalIgnoreCase);
         }
 
         // === Events ===
@@ -281,7 +320,7 @@ namespace SharpBrowser.BrowserObjects
             if (eventListeners.TryGetValue(type, out var list))
             {
                 foreach (var cb in list)
-                    cb.DynamicInvoke(args);
+                    cb.DynamicInvoke(new object[] { args });
             }
         }
 
@@ -297,6 +336,12 @@ namespace SharpBrowser.BrowserObjects
 
             result += $"</{TagName.ToLowerInvariant()}>";
             return result;
+        }
+
+        internal void RaiseHasChanged()
+        {
+            HasChanged?.Invoke(this, EventArgs.Empty);
+            ParentElement?.RaiseHasChanged();
         }
     }
 }

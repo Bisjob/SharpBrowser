@@ -84,6 +84,12 @@
     bool scriptsOpenned;
     bool errorsOpenned;
 
+    protected override void OnInitialized()
+    {
+        browser.PageHasChanged += HandlePageHasChanged;
+        base.OnInitialized();
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -132,8 +138,14 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private void HandlePageHasChanged(object sender, EventArgs e)
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
     public async ValueTask DisposeAsync()
     {
+        browser.PageHasChanged -= HandlePageHasChanged;
         if (moduleTask.IsValueCreated)
         {
             var module = await moduleTask.Value;

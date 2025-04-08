@@ -144,7 +144,7 @@ namespace SharpBrowser.BrowserObjects
 
         public int SetTimeout(Delegate callback, int delay, params object[] args)
         {
-            if (delay == 0)
+            if (delay <= 0)
             {
                 try
                 {

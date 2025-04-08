@@ -1,4 +1,5 @@
 ﻿using Jint;
+using Jint.Native;
 using Jint.Runtime;
 using Jint.Runtime.Debugger;
 using SharpBrowser.BrowserObjects;
@@ -52,6 +53,11 @@ namespace SharpBrowser
             };
 
             Window = new Window(Engine, client.DefaultRequestHeaders.UserAgent.ToString());
+
+            Window.Document.HasChanged += (s, e) =>
+            {
+                PageHasChanged?.Invoke(this, EventArgs.Empty);
+            };
         }
 
         public async Task NavigateTo(string url)
@@ -65,7 +71,7 @@ namespace SharpBrowser
 
         public void SetUrl(string url)
         {
-            Location.Href = url;
+            Location.SetUrl(url);
             UrlHasChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -75,7 +81,7 @@ namespace SharpBrowser
             Document.SetHTMLContent(html);
             await LoadStylesheets();
             await LoadScripts();
-
+            Document.DispatchEvent("DOMContentLoaded", Array.Empty<JsValue>());
             PageHasChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -139,7 +145,7 @@ namespace SharpBrowser
                 {
                     if (!href.StartsWith("http"))
                     {
-                        var uri = new Uri(new Uri(Location.Href), href);
+                        var uri = new Uri(Location.CurrentUri, href);
                         href = uri.ToString();
                     }
                     var content = await GetRequestContent(href);
